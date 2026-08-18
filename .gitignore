@@ -1,0 +1,9 @@
+# Compiled Go binaries
+main
+*.exe
+*.out
+*.app
+
+# OS-specific files
+.DS_Store
+Thumbs.db
