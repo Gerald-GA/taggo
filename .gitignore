@@ -7,3 +7,6 @@ main
 # OS-specific files
 .DS_Store
 Thumbs.db
+
+# Debug files
+*.txt

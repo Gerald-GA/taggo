@@ -18,23 +18,21 @@ import (
 )
 
 type Results struct {
-	Albums []AlbumResult `json:"data"`
+	Albums []struct {
+		ID       int64  `json:"id"`
+		Title    string `json:"title"`
+		Upc      string `json:"upc"`
+		Link     string `json:"tracklist"`
+		NbTracks int    `json:"nb_tracks"`
+		Explicit bool   `json:"explicit_lyrics"`
+		Artist   struct {
+			ID   int    `json:"id"`
+			Name string `json:"name"`
+		} `json:"artist"`
+	} `json:"data"`
 }
 
-type AlbumResult struct {
-	ID       int64  `json:"id"`
-	Title    string `json:"title"`
-	Upc      string `json:"upc"`
-	Link     string `json:"tracklist"`
-	NbTracks int    `json:"nb_tracks"`
-	Explicit bool   `json:"explicit_lyrics"`
-	Artist   struct {
-		ID   int    `json:"id"`
-		Name string `json:"name"`
-	} `json:"artist"`
-}
-
-type DeezerAlbumMetadata struct {
+type DeezerAlbumJSON struct {
 	ID       int64  `json:"id"`
 	Title    string `json:"title"`
 	Upc      string `json:"upc"`
@@ -59,7 +57,7 @@ type DeezerAlbumMetadata struct {
 	} `json:"tracks"`
 }
 
-type DeezerTrackMetadata struct {
+type DeezerTrackJSON struct {
 	Title          string `json:"title"`
 	TrackPosition  int    `json:"track_position"`
 	DiskNumber     int    `json:"disk_number"`
@@ -70,7 +68,7 @@ type DeezerTrackMetadata struct {
 	} `json:"contributors"`
 }
 
-type iTunesMetadata struct {
+type iTunesJSON struct {
 	Results []struct {
 		WrapperType           string    `json:"wrapperType"`
 		CollectionType        string    `json:"collectionType,omitempty"`
@@ -106,7 +104,7 @@ func main() {
 
 	files, err := os.ReadDir(albumDir)
 	if err != nil {
-		log.Fatal(err)
+		log.Fatalf("Crash: %s", err)
 	}
 
 	var artist, album, barcode string
@@ -185,17 +183,8 @@ func main() {
 
 func deezerSearch(artist string, album string) Results {
 	var result Results
-	deezerURL := fmt.Sprintf("https://api.deezer.com/search/album/?q=%q&limit=10", url.QueryEscape(artist+" "+album))
-	resp, err := http.Get(deezerURL)
-	if err != nil {
-		log.Fatal("HTTP GET request failed, ", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Fatal("Failed to read resp.Body, ", err)
-	}
-	err = json.Unmarshal(body, &result)
+	body := deezerAPI(fmt.Sprintf("https://api.deezer.com/search/album/?q=%q&limit=10", url.QueryEscape(artist+" "+album)))
+	err := json.Unmarshal(body, &result)
 	if err != nil {
 		log.Fatal("Error while processing JSON response:", err)
 	}
@@ -203,11 +192,36 @@ func deezerSearch(artist string, album string) Results {
 }
 
 func deezerLookup(id int64) {
-	var albumMetadata DeezerAlbumMetadata
-	// var trackMetadata []DeezerTrackMetadata
+	var albumMetadata DeezerAlbumJSON
+	var trackMetadata []DeezerTrackJSON
 	var trackIDs []int64
 
-	deezerURL := fmt.Sprintf("https://api.deezer.com/album/%d", id)
+	body := deezerAPI(fmt.Sprintf("https://api.deezer.com/album/%d", id))
+	err := json.Unmarshal(body, &albumMetadata)
+	if err != nil {
+		log.Fatal("Error while processing JSON response:", err)
+	}
+	for _, trackJSON := range albumMetadata.Tracks.Data {
+		trackIDs = append(trackIDs, trackJSON.ID)
+	}
+	if len(trackIDs) != albumMetadata.TotalTracks {
+		log.Fatalf("Total track IDs (%d) does not match album's reported track count (%d)", len(trackIDs), albumMetadata.TotalTracks)
+	} else {
+		fmt.Printf("Total track IDs (%d) matches album's reported track count (%d)\n", len(trackIDs), albumMetadata.TotalTracks)
+	}
+
+	for _, trackID := range trackIDs {
+		body := deezerAPI(fmt.Sprintf("https://api.deezer.com/track/%d", trackID))
+		var tmp DeezerTrackJSON
+		err := json.Unmarshal(body, &tmp)
+		if err != nil {
+			log.Fatal("Unable to parse JSON")
+		}
+		trackMetadata = append(trackMetadata, tmp)
+	}
+}
+
+func deezerAPI(deezerURL string) []byte {
 	resp, err := http.Get(deezerURL)
 	if err != nil {
 		log.Fatal("HTTP GET request failed, ", err)
@@ -217,18 +231,7 @@ func deezerLookup(id int64) {
 	if err != nil {
 		log.Fatal("Failed to read resp.Body, ", err)
 	}
-	err = json.Unmarshal(body, &albumMetadata)
-	if err != nil {
-		log.Fatal("Error while processing JSON response:", err)
-	}
-	for _, track := range albumMetadata.Tracks.Data {
-		trackIDs = append(trackIDs, track.ID)
-	}
-	if len(trackIDs) != albumMetadata.TotalTracks {
-		log.Fatalf("Total track IDs (%d) does not match album's reported track count (%d)", len(trackIDs), albumMetadata.TotalTracks)
-	} else {
-		fmt.Printf("Total track IDs (%d) matches album's reported track count (%d)\n", len(trackIDs), albumMetadata.TotalTracks)
-	}
+	return body
 }
 
 func iTunesLookup(barcode string) {
