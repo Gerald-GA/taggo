@@ -92,6 +92,21 @@ type iTunesJSON struct {
 	} `json:"results"`
 }
 
+type TrackMetadata struct {
+	AlbumName   string
+	AlbumArtist string
+	TotalTracks int
+	TotalDiscs  int
+	Genre       string
+	ReleaseDate string
+	Copyright   string
+	CoverURL    string
+	TrackTitle  string
+	TrackArtist string
+	TrackNumber int
+	TrackDisc   int
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: taggo <album folder>")
@@ -108,7 +123,7 @@ func main() {
 	}
 
 	var artist, album, barcode string
-	// var imetadata iTunesMetadata
+	var metadata []TrackMetadata
 
 	filePath := filepath.Join(albumDir, files[0].Name())
 	if !files[0].IsDir() && filepath.Ext(files[0].Name()) == ".flac" {
@@ -129,7 +144,7 @@ func main() {
 	}
 
 	if barcode != "" {
-		// imetadata = iTunesLookup(barcode)
+		metadata = iTunesLookup(barcode)
 	} else {
 		albums := deezerSearch(artist, album)
 		if len(albums.Albums) == 0 {
@@ -155,6 +170,10 @@ func main() {
 		}
 		fmt.Println(num)
 		deezerLookup(albums.Albums[num-1].ID)
+	}
+
+	for _, track := range metadata {
+		fmt.Printf("%d: %s - %s\n", track.TrackNumber, track.TrackTitle, track.TrackArtist)
 	}
 
 	// for _, file := range files {
@@ -183,7 +202,7 @@ func main() {
 
 func deezerSearch(artist string, album string) Results {
 	var result Results
-	body := deezerAPI(fmt.Sprintf("https://api.deezer.com/search/album/?q=%q&limit=10", url.QueryEscape(artist+" "+album)))
+	body := callAPI(fmt.Sprintf("https://api.deezer.com/search/album/?q=%q&limit=10", url.QueryEscape(artist+" "+album)))
 	err := json.Unmarshal(body, &result)
 	if err != nil {
 		log.Fatal("Error while processing JSON response:", err)
@@ -196,7 +215,7 @@ func deezerLookup(id int64) {
 	var trackMetadata []DeezerTrackJSON
 	var trackIDs []int64
 
-	body := deezerAPI(fmt.Sprintf("https://api.deezer.com/album/%d", id))
+	body := callAPI(fmt.Sprintf("https://api.deezer.com/album/%d", id))
 	err := json.Unmarshal(body, &albumMetadata)
 	if err != nil {
 		log.Fatal("Error while processing JSON response:", err)
@@ -211,7 +230,7 @@ func deezerLookup(id int64) {
 	}
 
 	for _, trackID := range trackIDs {
-		body := deezerAPI(fmt.Sprintf("https://api.deezer.com/track/%d", trackID))
+		body := callAPI(fmt.Sprintf("https://api.deezer.com/track/%d", trackID))
 		var tmp DeezerTrackJSON
 		err := json.Unmarshal(body, &tmp)
 		if err != nil {
@@ -221,8 +240,18 @@ func deezerLookup(id int64) {
 	}
 }
 
-func deezerAPI(deezerURL string) []byte {
-	resp, err := http.Get(deezerURL)
+func iTunesLookup(UPC string) []TrackMetadata {
+	var result iTunesJSON
+	body := callAPI(fmt.Sprintf("https://itunes.apple.com/lookup?upc=%s&entity=song", UPC))
+	err := json.Unmarshal(body, &result)
+	if err != nil {
+		log.Fatal("Error while processing JSON response:", err)
+	}
+	return itunesDecode(result)
+}
+
+func callAPI(URL string) []byte {
+	resp, err := http.Get(URL)
 	if err != nil {
 		log.Fatal("HTTP GET request failed, ", err)
 	}
@@ -234,6 +263,38 @@ func deezerAPI(deezerURL string) []byte {
 	return body
 }
 
-func iTunesLookup(barcode string) {
+func itunesDecode(album iTunesJSON) []TrackMetadata {
+	if len(album.Results) == 0 {
+		log.Fatal("Didn't get any results for album")
+	}
+
+	if len(album.Results) != album.Results[0].TrackCount+1 {
+		log.Fatal("Number of returned tracks from iTunes does not match reported Track Count")
+	}
+
+	var metadata []TrackMetadata
+	releaseDate := album.Results[0].ReleaseDate.Format("2006-01-02")
+	highResCover := strings.Replace(album.Results[0].ArtworkURL100, "100x100", "1400x1400", 1)
+
+	for i := 1; i <= album.Results[0].TrackCount; i++ {
+		var tmp TrackMetadata
+		tmp.AlbumName = album.Results[0].CollectionName
+		tmp.AlbumArtist = album.Results[0].CollectionArtistName
+		tmp.TotalTracks = album.Results[0].TrackCount
+		tmp.TotalDiscs = album.Results[0].DiscCount
+		tmp.Genre = album.Results[0].PrimaryGenreName
+		tmp.ReleaseDate = releaseDate
+		tmp.Copyright = album.Results[0].Copyright
+		tmp.CoverURL = highResCover
+		tmp.TrackTitle = album.Results[i].TrackName
+		tmp.TrackArtist = album.Results[i].ArtistName
+		tmp.TrackNumber = album.Results[i].TrackNumber
+		tmp.TrackDisc = album.Results[i].DiscNumber
+		metadata = append(metadata, tmp)
+	}
+	return metadata
+}
+
+func deezerDecode(album DeezerAlbumJSON, tracks []DeezerTrackJSON) {
 	// TODO
 }
