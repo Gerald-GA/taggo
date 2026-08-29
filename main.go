@@ -14,97 +14,101 @@ import (
 	"strings"
 	"time"
 
-	"github.com/dhowden/tag"
+	"go.senan.xyz/taglib"
 )
 
 type Results struct {
 	Albums []struct {
-		ID       int64  `json:"id"`
-		Title    string `json:"title"`
-		Upc      string `json:"upc"`
-		Link     string `json:"tracklist"`
-		NbTracks int    `json:"nb_tracks"`
-		Explicit bool   `json:"explicit_lyrics"`
-		Artist   struct {
-			ID   int    `json:"id"`
+		Title  string `json:"title"`
+		Upc    string `json:"upc"`
+		Link   string `json:"tracklist"`
+		Artist struct {
 			Name string `json:"name"`
+			ID   int    `json:"id"`
 		} `json:"artist"`
+		ID       int64 `json:"id"`
+		NbTracks int   `json:"nb_tracks"`
+		Explicit bool  `json:"explicit_lyrics"`
 	} `json:"data"`
 }
 
 type DeezerAlbumJSON struct {
-	ID       int64  `json:"id"`
-	Title    string `json:"title"`
-	Upc      string `json:"upc"`
-	CoverBig string `json:"cover_big"`
-	CoverXl  string `json:"cover_xl"`
-	Genres   struct {
+	Title       string `json:"title"`
+	Upc         string `json:"upc"`
+	CoverBig    string `json:"cover_big"`
+	Label       string `json:"label"`
+	ReleaseDate string `json:"release_date"`
+	Artist      struct {
+		Name string `json:"name"`
+	} `json:"artist"`
+	Genres struct {
 		Data []struct {
 			Name string `json:"name"`
 		} `json:"data"`
 	} `json:"genres"`
-	Label          string `json:"label"`
-	TotalTracks    int    `json:"nb_tracks"`
-	ReleaseDate    string `json:"release_date"`
-	ExplicitLyrics bool   `json:"explicit_lyrics"`
-	Artist         struct {
-		Name string `json:"name"`
-	} `json:"artist"`
 	Tracks struct {
 		Data []struct {
 			ID int64 `json:"id"`
 		} `json:"data"`
 	} `json:"tracks"`
+	ID             int64 `json:"id"`
+	TotalTracks    int   `json:"nb_tracks"`
+	ExplicitLyrics bool  `json:"explicit_lyrics"`
 }
 
 type DeezerTrackJSON struct {
-	Title          string `json:"title"`
-	TrackPosition  int    `json:"track_position"`
-	DiskNumber     int    `json:"disk_number"`
-	ReleaseDate    string `json:"release_date"`
-	ExplicitLyrics bool   `json:"explicit_lyrics"`
-	Contributors   []struct {
+	Title        string `json:"title"`
+	ReleaseDate  string `json:"release_date"`
+	Contributors []struct {
 		Name string `json:"name"`
 	} `json:"contributors"`
+	TrackPosition  int  `json:"track_position"`
+	DiskNumber     int  `json:"disk_number"`
+	ExplicitLyrics bool `json:"explicit_lyrics"`
 }
 
 type iTunesJSON struct {
 	Results []struct {
-		WrapperType           string    `json:"wrapperType"`
-		CollectionType        string    `json:"collectionType,omitempty"`
-		CollectionID          int64     `json:"collectionId"`
-		ArtistName            string    `json:"artistName"`
-		CollectionName        string    `json:"collectionName"`
-		ArtworkURL100         string    `json:"artworkUrl100"`
-		ContentAdvisoryRating string    `json:"contentAdvisoryRating"`
-		TrackCount            int       `json:"trackCount"`
-		Copyright             string    `json:"copyright,omitempty"`
-		ReleaseDate           time.Time `json:"releaseDate"`
-		PrimaryGenreName      string    `json:"primaryGenreName"`
-		Kind                  string    `json:"kind,omitempty"`
-		TrackID               int64     `json:"trackId,omitempty"`
-		TrackName             string    `json:"trackName,omitempty"`
-		CollectionArtistName  string    `json:"collectionArtistName,omitempty"`
-		TrackExplicitness     string    `json:"trackExplicitness,omitempty"`
-		DiscCount             int       `json:"discCount,omitempty"`
-		DiscNumber            int       `json:"discNumber,omitempty"`
-		TrackNumber           int       `json:"trackNumber,omitempty"`
+		ReleaseDate            time.Time `json:"releaseDate"`
+		PrimaryGenreName       string    `json:"primaryGenreName"`
+		TrackName              string    `json:"trackName,omitempty"`
+		ArtworkURL100          string    `json:"artworkUrl100"`
+		CollectionExplicitness string    `json:"collectionExplicitness"`
+		ArtistName             string    `json:"artistName"`
+		Copyright              string    `json:"copyright,omitempty"`
+		CollectionName         string    `json:"collectionName"`
+		TrackExplicitness      string    `json:"trackExplicitness,omitempty"`
+		Kind                   string    `json:"kind,omitempty"`
+		TrackCount             int       `json:"trackCount"`
+		CollectionID           int64     `json:"collectionId"`
+		TrackID                int64     `json:"trackId,omitempty"`
+		DiscCount              int       `json:"discCount,omitempty"`
+		DiscNumber             int       `json:"discNumber,omitempty"`
+		TrackNumber            int       `json:"trackNumber,omitempty"`
 	} `json:"results"`
 }
 
 type TrackMetadata struct {
-	AlbumName   string
-	AlbumArtist string
-	TotalTracks int
-	TotalDiscs  int
-	Genre       string
-	ReleaseDate string
-	Copyright   string
-	CoverURL    string
-	TrackTitle  string
-	TrackArtist string
-	TrackNumber int
-	TrackDisc   int
+	Copyright     string
+	AlbumUPC      string
+	TrackArtist   string
+	AlbumName     string
+	AlbumArtist   string
+	TrackTitle    string
+	ReleaseDate   string
+	Genre         string
+	Kind          string
+	CoverURL      string
+	CollectionID  string
+	TrackID       string
+	DeezerTrackID string
+	DeezerAlbumID string
+	TotalDiscs    int
+	TotalTracks   int
+	TrackNumber   int
+	TrackDisc     int
+	AlbumExplict  bool
+	TrackExplicit bool
 }
 
 func main() {
@@ -125,39 +129,47 @@ func main() {
 	var artist, album, barcode string
 	var metadata []TrackMetadata
 
-	filePath := filepath.Join(albumDir, files[0].Name())
-	if !files[0].IsDir() && filepath.Ext(files[0].Name()) == ".flac" {
-		f, err := os.Open(filePath)
-		if err != nil {
-			log.Fatalf("Failed to open file: %v", err)
-		}
+	for _, file := range files {
+		if !file.IsDir() && strings.EqualFold(filepath.Ext(file.Name()), ".flac") {
+			filePath := filepath.Join(albumDir, file.Name())
+			tags, err := taglib.ReadTags(filePath)
+			if err != nil {
+				log.Fatalf("Failed to parse tags: %v", err)
+			}
 
-		m, err := tag.ReadFrom(f)
-		if err != nil {
-			log.Fatalf("Failed to parse tags: %v", err)
-		}
+			getFirst := func(field string) string {
+				if vals, ok := tags[field]; ok && len(vals) > 0 {
+					return vals[0]
+				}
+				return ""
+			}
 
-		barcode, _ = m.Raw()["barcode"].(string)
-		artist = m.Artist()
-		album = m.Album()
-		f.Close()
+			barcode = getFirst(taglib.Barcode)
+			artist = getFirst(taglib.AlbumArtist)
+			album = getFirst(taglib.Album)
+			break
+		}
 	}
 
 	if barcode != "" {
+		fmt.Println("Found Barcode, querying iTunes...")
 		metadata = iTunesLookup(barcode)
 	} else {
+		if artist == "" || album == "" {
+			log.Fatal("Could not find artist or album tags in folder files, and no barcode present.")
+		}
+		fmt.Println("No Barcode found, searching Deezer...")
 		albums := deezerSearch(artist, album)
 		if len(albums.Albums) == 0 {
 			log.Fatal("No matching albums found! Exiting...")
 		}
-		for i, album := range albums.Albums {
+		for i, a := range albums.Albums {
 			advisory := "explicit"
-			if !album.Explicit {
+			if !a.Explicit {
 				advisory = "clean"
 			}
-			fmt.Printf("%d: %s - %s (%d Tracks | %s)\n", i+1, album.Title, album.Artist.Name, album.NbTracks, advisory)
+			fmt.Printf("%d: %s - %s (%d Tracks | %s)\n\n", i+1, a.Title, a.Artist.Name, a.NbTracks, advisory)
 		}
-		fmt.Println()
 		reader := bufio.NewReader(os.Stdin)
 		fmt.Print("Enter the number which corresponds to the correct album: ")
 		text, err := reader.ReadString('\n')
@@ -165,63 +177,104 @@ func main() {
 			log.Fatal("Error reading user input")
 		}
 		num, err := strconv.Atoi(strings.TrimSpace(text))
-		if err != nil {
-			log.Fatal("Please enter a valid number")
+		if err != nil || num < 1 || num > len(albums.Albums) {
+			log.Fatal("Please enter a valid selection")
 		}
-		fmt.Println(num)
-		deezerLookup(albums.Albums[num-1].ID)
+		metadata = deezerLookup(albums.Albums[num-1].ID)
 	}
 
-	for _, track := range metadata {
-		fmt.Printf("%d: %s - %s\n", track.TrackNumber, track.TrackTitle, track.TrackArtist)
+	if len(metadata) == 0 {
+		log.Fatal("API returned empty metadata list!")
 	}
 
-	// for _, file := range files {
-	// 	filePath := filepath.Join(albumDir, file.Name())
-	// 	if !file.IsDir() && filepath.Ext(file.Name()) == ".flac" {
-	// 		fmt.Println("Found file:", file.Name())
-	// 		f, err := os.Open(filePath)
-	// 		if err != nil {
-	// 			log.Fatalf("Failed to open file: %v", err)
-	// 		}
+	// Download cover art once
+	cover, err := fetchURL(metadata[0].CoverURL)
+	if err != nil {
+		fmt.Println("Faild to download cover art:", err)
+	} else {
+		fmt.Println("Successfully downloaded cover art")
+	}
 
-	// 		m, err := tag.ReadFrom(f)
-	// 		if err != nil {
-	// 			log.Fatalf("Failed to parse tags: %v", err)
-	// 		}
+	for _, file := range files {
+		if !file.IsDir() && strings.EqualFold(filepath.Ext(file.Name()), ".flac") {
+			filePath := filepath.Join(albumDir, file.Name())
 
-	// 		// TODO: Sort map or create a new struct for holding metadata.
-	// 		for key, value := range m.Raw() {
-	// 			fmt.Printf("%s: %s\n", key, value)
-	// 		}
-	// 		fmt.Println()
-	// 		f.Close()
-	// 	}
-	// }
+			tags, err := taglib.ReadTags(filePath)
+			if err != nil {
+				log.Printf("Skipping file, failed to parse tags: %v", err)
+				continue
+			}
+
+			// Extract track number from audio tags
+			// TODO: Add backup for tagless tracks, eg "track 01.flac"
+			if len(tags[taglib.TrackNumber]) == 0 {
+				log.Printf("Skipping %s: missing track number tag", file.Name())
+				continue
+			}
+
+			tracknum, err := strconv.Atoi(tags[taglib.TrackNumber][0])
+			if err != nil {
+				log.Printf("Skipping %s: Error converting track number (%s) to int", file.Name(), tags[taglib.TrackNumber][0])
+				continue
+			}
+
+			// Prevent index out of range if metadata slice is smaller than tracknum
+			idx := tracknum - 1
+			if idx < 0 || idx >= len(metadata) {
+				log.Printf("Skipping %s: track number %d exceeds API metadata length (%d)", file.Name(), tracknum, len(metadata))
+				continue
+			}
+
+			fmt.Printf("Processing Track %d: %s\n", tracknum, file.Name())
+
+			// Write Text Tags
+			err = taglib.WriteTags(filePath, metadata[idx].ToTagMap(), taglib.Clear)
+			if err != nil {
+				log.Printf("Failed to write tags for %s: %v", file.Name(), err)
+				continue
+			}
+
+			// Write Cover Art (if downloaded successfully)
+			if len(cover) > 0 {
+				err = taglib.WriteImage(filePath, cover)
+				if err != nil {
+					fmt.Printf("Failed to write cover art to %s: %v\n", file.Name(), err)
+				}
+			}
+		}
+	}
+	fmt.Println("Done tagging album!")
 }
 
 func deezerSearch(artist string, album string) Results {
 	var result Results
-	body := callAPI(fmt.Sprintf("https://api.deezer.com/search/album/?q=%q&limit=10", url.QueryEscape(artist+" "+album)))
-	err := json.Unmarshal(body, &result)
+	body, err := fetchURL(fmt.Sprintf("https://api.deezer.com/search/album/?q=%q&limit=10", url.QueryEscape(artist+" "+album)))
+	if err != nil {
+		log.Fatal("Failed to search album in Deezer database:", err)
+	}
+	err = json.Unmarshal(body, &result)
 	if err != nil {
 		log.Fatal("Error while processing JSON response:", err)
 	}
 	return result
 }
 
-func deezerLookup(id int64) {
+func deezerLookup(id int64) []TrackMetadata {
 	var albumMetadata DeezerAlbumJSON
 	var trackMetadata []DeezerTrackJSON
 	var trackIDs []int64
 
-	body := callAPI(fmt.Sprintf("https://api.deezer.com/album/%d", id))
-	err := json.Unmarshal(body, &albumMetadata)
+	body, err := fetchURL(fmt.Sprintf("https://api.deezer.com/album/%d", id))
+	if err != nil {
+		log.Fatal("Failed to lookup album metadata in Deezer database:", err)
+	}
+	err = json.Unmarshal(body, &albumMetadata)
 	if err != nil {
 		log.Fatal("Error while processing JSON response:", err)
 	}
-	for _, trackJSON := range albumMetadata.Tracks.Data {
+	for i, trackJSON := range albumMetadata.Tracks.Data {
 		trackIDs = append(trackIDs, trackJSON.ID)
+		fmt.Printf("%d: %d\n", i, trackJSON.ID)
 	}
 	if len(trackIDs) != albumMetadata.TotalTracks {
 		log.Fatalf("Total track IDs (%d) does not match album's reported track count (%d)", len(trackIDs), albumMetadata.TotalTracks)
@@ -230,40 +283,53 @@ func deezerLookup(id int64) {
 	}
 
 	for _, trackID := range trackIDs {
-		body := callAPI(fmt.Sprintf("https://api.deezer.com/track/%d", trackID))
+		body, err := fetchURL(fmt.Sprintf("https://api.deezer.com/track/%d", trackID))
+		if err != nil {
+			log.Fatal("Failed to lookup track metadata in Deezer database:", err)
+		}
 		var tmp DeezerTrackJSON
-		err := json.Unmarshal(body, &tmp)
+		err = json.Unmarshal(body, &tmp)
 		if err != nil {
 			log.Fatal("Unable to parse JSON")
 		}
 		trackMetadata = append(trackMetadata, tmp)
 	}
+	return deezerDecode(albumMetadata, trackMetadata)
 }
 
 func iTunesLookup(UPC string) []TrackMetadata {
 	var result iTunesJSON
-	body := callAPI(fmt.Sprintf("https://itunes.apple.com/lookup?upc=%s&entity=song", UPC))
-	err := json.Unmarshal(body, &result)
+	body, err := fetchURL(fmt.Sprintf("https://itunes.apple.com/lookup?upc=%s&entity=song", UPC))
+	if err != nil {
+		log.Fatal("Error looking up album in iTunes database:", err)
+	}
+	err = json.Unmarshal(body, &result)
 	if err != nil {
 		log.Fatal("Error while processing JSON response:", err)
 	}
-	return itunesDecode(result)
+	return itunesDecode(result, UPC)
 }
 
-func callAPI(URL string) []byte {
+func fetchURL(URL string) ([]byte, error) {
 	resp, err := http.Get(URL)
 	if err != nil {
-		log.Fatal("HTTP GET request failed, ", err)
+		return nil, fmt.Errorf("HTTP GET request failed: %w", err)
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("HTTP Error code: %d", resp.StatusCode)
+	}
+
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		log.Fatal("Failed to read resp.Body, ", err)
+		return nil, fmt.Errorf("Failed to read resp.Body: %w", err)
 	}
-	return body
+
+	return body, nil
 }
 
-func itunesDecode(album iTunesJSON) []TrackMetadata {
+func itunesDecode(album iTunesJSON, UPC string) []TrackMetadata {
 	if len(album.Results) == 0 {
 		log.Fatal("Didn't get any results for album")
 	}
@@ -274,27 +340,144 @@ func itunesDecode(album iTunesJSON) []TrackMetadata {
 
 	var metadata []TrackMetadata
 	releaseDate := album.Results[0].ReleaseDate.Format("2006-01-02")
-	highResCover := strings.Replace(album.Results[0].ArtworkURL100, "100x100", "1400x1400", 1)
+	highResCover := strings.Replace(album.Results[0].ArtworkURL100, "100x100", "800x800", 1)
 
+	// Starts at index 1 because the first result from iTunes is the album collection, after that follows each track
 	for i := 1; i <= album.Results[0].TrackCount; i++ {
 		var tmp TrackMetadata
+
+		if album.Results[0].CollectionExplicitness == "explicit" {
+			tmp.AlbumExplict = true
+		} else {
+			tmp.AlbumExplict = false
+		}
+
+		if album.Results[i].TrackExplicitness == "explicit" {
+			tmp.TrackExplicit = true
+		} else {
+			tmp.TrackExplicit = false
+		}
+		tmp.AlbumUPC = UPC
+		tmp.CollectionID = strconv.FormatInt(album.Results[0].CollectionID, 10)
 		tmp.AlbumName = album.Results[0].CollectionName
-		tmp.AlbumArtist = album.Results[0].CollectionArtistName
+		tmp.AlbumArtist = album.Results[0].ArtistName
 		tmp.TotalTracks = album.Results[0].TrackCount
 		tmp.TotalDiscs = album.Results[0].DiscCount
 		tmp.Genre = album.Results[0].PrimaryGenreName
 		tmp.ReleaseDate = releaseDate
 		tmp.Copyright = album.Results[0].Copyright
 		tmp.CoverURL = highResCover
+		tmp.Kind = album.Results[i].Kind
+		tmp.TrackID = strconv.FormatInt(album.Results[i].TrackID, 10)
 		tmp.TrackTitle = album.Results[i].TrackName
 		tmp.TrackArtist = album.Results[i].ArtistName
 		tmp.TrackNumber = album.Results[i].TrackNumber
 		tmp.TrackDisc = album.Results[i].DiscNumber
 		metadata = append(metadata, tmp)
+		// Debugging
+		prettyStruct, _ := json.MarshalIndent(tmp, "", "  ")
+		fmt.Println(string(prettyStruct))
 	}
 	return metadata
 }
 
-func deezerDecode(album DeezerAlbumJSON, tracks []DeezerTrackJSON) {
-	// TODO
+func deezerDecode(album DeezerAlbumJSON, tracks []DeezerTrackJSON) []TrackMetadata {
+	var metadata []TrackMetadata
+	highResCover := strings.Replace(album.CoverBig, "500x500", "800x800", 1)
+	totalDiscs := 1
+
+	for _, track := range tracks {
+		if track.DiskNumber > totalDiscs {
+			totalDiscs = track.DiskNumber
+		}
+	}
+
+	genre := "Unknown"
+	if len(album.Genres.Data) > 0 {
+		genre = album.Genres.Data[0].Name
+	}
+
+	for i, track := range tracks {
+		var tmp TrackMetadata
+		tmp.AlbumUPC = album.Upc
+		tmp.DeezerAlbumID = strconv.FormatInt(album.ID, 10)
+		tmp.DeezerTrackID = strconv.FormatInt(album.Tracks.Data[i].ID, 10)
+		tmp.AlbumExplict = album.ExplicitLyrics
+		tmp.AlbumName = album.Title
+		tmp.AlbumArtist = album.Artist.Name
+		tmp.TotalTracks = album.TotalTracks
+		tmp.TotalDiscs = totalDiscs
+		tmp.Genre = genre
+		tmp.ReleaseDate = album.ReleaseDate
+		tmp.Copyright = album.Label
+		tmp.CoverURL = highResCover
+		tmp.TrackExplicit = track.ExplicitLyrics
+		tmp.TrackTitle = track.Title
+
+		var artists []string
+		for _, artist := range track.Contributors {
+			artists = append(artists, artist.Name)
+		}
+
+		tmp.TrackArtist = strings.Join(artists, ", ")
+		tmp.TrackNumber = track.TrackPosition
+		tmp.TrackDisc = track.DiskNumber
+		metadata = append(metadata, tmp)
+		// Debugging
+		prettyStruct, _ := json.MarshalIndent(tmp, "", "  ")
+		fmt.Println(string(prettyStruct))
+	}
+	return metadata
+}
+
+func (t TrackMetadata) ToTagMap() map[string][]string {
+	tags := make(map[string][]string)
+
+	if t.AlbumName != "" {
+		tags[taglib.Album] = []string{t.AlbumName}
+	}
+	if t.AlbumArtist != "" {
+		tags[taglib.AlbumArtist] = []string{t.AlbumArtist}
+	}
+	if t.TrackTitle != "" {
+		tags[taglib.Title] = []string{t.TrackTitle}
+	}
+	if t.TrackArtist != "" {
+		tags[taglib.Artist] = []string{t.TrackArtist}
+	}
+	if t.Genre != "" {
+		tags[taglib.Genre] = []string{t.Genre}
+	}
+	if t.ReleaseDate != "" {
+		tags[taglib.Date] = []string{t.ReleaseDate}
+	}
+	if t.Copyright != "" {
+		tags[taglib.Copyright] = []string{t.Copyright}
+	}
+	if t.TrackNumber > 0 {
+		tags[taglib.TrackNumber] = []string{strconv.Itoa(t.TrackNumber)}
+	}
+	if t.TotalTracks > 0 {
+		tags["TRACKTOTAL"] = []string{strconv.Itoa(t.TotalTracks)}
+	}
+	if t.TrackDisc > 0 {
+		tags[taglib.DiscNumber] = []string{strconv.Itoa(t.TrackDisc)}
+	}
+	if t.AlbumUPC != "" {
+		tags[taglib.Barcode] = []string{t.AlbumUPC}
+	}
+	if t.CollectionID != "" {
+		tags["ITUNESALBUMID"] = []string{t.CollectionID}
+	}
+	if t.TrackID != "" {
+		tags["ITUNESTRACKID"] = []string{t.TrackID}
+	}
+	if t.DeezerAlbumID != "" {
+		tags["DEEZERALBUMID"] = []string{t.DeezerAlbumID}
+	}
+	if t.TrackID != "" {
+		tags["DEEZERTRACKID"] = []string{t.DeezerTrackID}
+	}
+
+	return tags
 }
