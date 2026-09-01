@@ -17,7 +17,20 @@ import (
 	"go.senan.xyz/taglib"
 )
 
-type Results struct {
+type iTunesResults struct {
+	ResultCount int `json:"resultCount"`
+	Results     []struct {
+		ArtistName             string    `json:"artistName"`
+		CollectionName         string    `json:"collectionName"`
+		CollectionExplicitness string    `json:"collectionExplicitness"`
+		CollectionViewURL      string    `json:"collectionViewUrl"`
+		CollectionID           int64     `json:"collectionId"`
+		TrackCount             int       `json:"trackCount"`
+		ReleaseDate            time.Time `json:"releaseDate"`
+	} `json:"results"`
+}
+
+type DeezerResults struct {
 	Albums []struct {
 		Title  string `json:"title"`
 		Upc    string `json:"upc"`
@@ -111,6 +124,12 @@ type TrackMetadata struct {
 	TrackExplicit bool
 }
 
+type AudioFile struct {
+	Path        string
+	Name        string
+	TrackNumber int
+}
+
 func main() {
 	if len(os.Args) < 2 {
 		fmt.Println("Usage: taggo <album folder>")
@@ -118,8 +137,6 @@ func main() {
 	}
 
 	albumDir := os.Args[1]
-	fmt.Println("Folder loaded: ", filepath.Base(albumDir))
-	fmt.Println("Scanning first track for existing metadata")
 
 	files, err := os.ReadDir(albumDir)
 	if err != nil {
@@ -128,6 +145,7 @@ func main() {
 
 	var artist, album, barcode string
 	var metadata []TrackMetadata
+	var filelist []AudioFile
 
 	for _, file := range files {
 		if !file.IsDir() && strings.EqualFold(filepath.Ext(file.Name()), ".flac") {
@@ -137,28 +155,48 @@ func main() {
 				log.Fatalf("Failed to parse tags: %v", err)
 			}
 
-			getFirst := func(field string) string {
-				if vals, ok := tags[field]; ok && len(vals) > 0 {
-					return vals[0]
-				}
-				return ""
+			// TODO: Add backup for tagless tracks, eg "track 01.flac"
+			if len(tags[taglib.TrackNumber]) == 0 {
+				log.Printf("Skipping %s: missing track number tag", file.Name())
+				continue
 			}
 
-			barcode = getFirst(taglib.Barcode)
-			artist = getFirst(taglib.AlbumArtist)
-			album = getFirst(taglib.Album)
-			break
+			var tracknum int
+			if strings.Contains(tags[taglib.TrackNumber][0], "/") {
+				tracknum, err = strconv.Atoi(strings.Split(tags[taglib.TrackNumber][0], "/")[0])
+			} else {
+				tracknum, err = strconv.Atoi(tags[taglib.TrackNumber][0])
+			}
+
+			if err != nil {
+				log.Printf("Skipping %s: Error converting track number (%s) to int", file.Name(), tags[taglib.TrackNumber][0])
+				continue
+			}
+
+			filelist = append(filelist, AudioFile{Path: filePath, Name: file.Name(), TrackNumber: tracknum})
+
+			if artist == "" || album == "" {
+				getFirst := func(field string) string {
+					if vals, ok := tags[field]; ok && len(vals) > 0 {
+						return vals[0]
+					}
+					return ""
+				}
+
+				barcode = getFirst(taglib.Barcode)
+				artist = getFirst(taglib.AlbumArtist)
+				album = getFirst(taglib.Album)
+			}
 		}
 	}
 
-	if barcode != "" {
-		fmt.Println("Found Barcode, querying iTunes...")
-		metadata = iTunesLookup(barcode)
-	} else {
+	fmt.Printf("Album loaded: %s - %s (%d Tracks)\n\n", artist, album, len(files))
+
+	if barcode == "" {
 		if artist == "" || album == "" {
 			log.Fatal("Could not find artist or album tags in folder files, and no barcode present.")
 		}
-		fmt.Println("No Barcode found, searching Deezer...")
+		fmt.Printf("No Barcode found, searching Deezer...\n\n")
 		albums := deezerSearch(artist, album)
 		if len(albums.Albums) == 0 {
 			log.Fatal("No matching albums found! Exiting...")
@@ -168,10 +206,10 @@ func main() {
 			if !a.Explicit {
 				advisory = "clean"
 			}
-			fmt.Printf("%d: %s - %s (%d Tracks | %s)\n\n", i+1, a.Title, a.Artist.Name, a.NbTracks, advisory)
+			fmt.Printf("%d: %s - %s (%d Tracks | %s)\n", i+1, a.Artist.Name, a.Title, a.NbTracks, advisory)
 		}
 		reader := bufio.NewReader(os.Stdin)
-		fmt.Print("Enter the number which corresponds to the correct album: ")
+		fmt.Printf("\nEnter the number which corresponds to the correct album: ")
 		text, err := reader.ReadString('\n')
 		if err != nil {
 			log.Fatal("Error reading user input")
@@ -180,11 +218,49 @@ func main() {
 		if err != nil || num < 1 || num > len(albums.Albums) {
 			log.Fatal("Please enter a valid selection")
 		}
-		metadata = deezerLookup(albums.Albums[num-1].ID)
+		barcode = deezerUPCLookup(albums.Albums[num-1].ID)
 	}
 
+	fmt.Println("looking up Barcode in iTunes...")
+	results := iTunesSearch(barcode)
+
+	switch results.ResultCount {
+	case 0:
+		log.Fatal("Unable to find album")
+	case 1:
+		metadata = iTunesLookup(barcode, results.Results[0].CollectionID)
+	default:
+		for i, album := range results.Results {
+			fmt.Printf("%d: %s - %s (%d) (%d Tracks | %s) Link: %s\n", i+1, album.ArtistName, album.CollectionName, album.ReleaseDate.Year(), album.TrackCount, album.CollectionExplicitness, album.CollectionViewURL)
+		}
+		reader := bufio.NewReader(os.Stdin)
+		fmt.Printf("\nEnter the number which corresponds to the correct album: ")
+		text, err := reader.ReadString('\n')
+		if err != nil {
+			log.Fatal("Error reading user input")
+		}
+		num, err := strconv.Atoi(strings.TrimSpace(text))
+		if err != nil || num < 1 || num > results.ResultCount {
+			log.Fatal("Please enter a valid selection")
+		}
+		metadata = iTunesLookup(barcode, results.Results[num-1].CollectionID)
+	}
+
+	// TODO: Add deezer lookup fallback
 	if len(metadata) == 0 {
 		log.Fatal("API returned empty metadata list!")
+	}
+
+	fmt.Println("Please confirm that the following is correct")
+	Confirm(filelist, metadata)
+
+	reader := bufio.NewReader(os.Stdin)
+	fmt.Print("\nDoes this look correct? (y/n): \n")
+	text, _ := reader.ReadString('\n')
+	fmt.Println()
+	if strings.ToLower(strings.TrimSpace(text)) != "y" {
+		fmt.Println("Aborted by user.")
+		return
 	}
 
 	// Download cover art once
@@ -195,59 +271,36 @@ func main() {
 		fmt.Println("Successfully downloaded cover art")
 	}
 
-	for _, file := range files {
-		if !file.IsDir() && strings.EqualFold(filepath.Ext(file.Name()), ".flac") {
-			filePath := filepath.Join(albumDir, file.Name())
+	for _, file := range filelist {
+		// Prevent index out of range if metadata slice is smaller than tracknum
+		idx := file.TrackNumber - 1
+		if idx < 0 || idx >= len(metadata) {
+			log.Printf("Skipping %s: track number %d exceeds API metadata length (%d)", file.Name, file.TrackNumber, len(metadata))
+			continue
+		}
 
-			tags, err := taglib.ReadTags(filePath)
+		fmt.Printf("Processing Track %d: %s\n", file.TrackNumber, file.Name)
+
+		// Write Text Tags
+		err = taglib.WriteTags(file.Path, metadata[idx].ToTagMap(), taglib.Clear)
+		if err != nil {
+			log.Printf("Failed to write tags for %s: %v", file.Name, err)
+			continue
+		}
+
+		// Write Cover Art (if downloaded successfully)
+		if len(cover) > 0 {
+			err = taglib.WriteImage(file.Path, cover)
 			if err != nil {
-				log.Printf("Skipping file, failed to parse tags: %v", err)
-				continue
-			}
-
-			// Extract track number from audio tags
-			// TODO: Add backup for tagless tracks, eg "track 01.flac"
-			if len(tags[taglib.TrackNumber]) == 0 {
-				log.Printf("Skipping %s: missing track number tag", file.Name())
-				continue
-			}
-
-			tracknum, err := strconv.Atoi(tags[taglib.TrackNumber][0])
-			if err != nil {
-				log.Printf("Skipping %s: Error converting track number (%s) to int", file.Name(), tags[taglib.TrackNumber][0])
-				continue
-			}
-
-			// Prevent index out of range if metadata slice is smaller than tracknum
-			idx := tracknum - 1
-			if idx < 0 || idx >= len(metadata) {
-				log.Printf("Skipping %s: track number %d exceeds API metadata length (%d)", file.Name(), tracknum, len(metadata))
-				continue
-			}
-
-			fmt.Printf("Processing Track %d: %s\n", tracknum, file.Name())
-
-			// Write Text Tags
-			err = taglib.WriteTags(filePath, metadata[idx].ToTagMap(), taglib.Clear)
-			if err != nil {
-				log.Printf("Failed to write tags for %s: %v", file.Name(), err)
-				continue
-			}
-
-			// Write Cover Art (if downloaded successfully)
-			if len(cover) > 0 {
-				err = taglib.WriteImage(filePath, cover)
-				if err != nil {
-					fmt.Printf("Failed to write cover art to %s: %v\n", file.Name(), err)
-				}
+				fmt.Printf("Failed to write cover art to %s: %v\n", file.Name, err)
 			}
 		}
 	}
 	fmt.Println("Done tagging album!")
 }
 
-func deezerSearch(artist string, album string) Results {
-	var result Results
+func deezerSearch(artist string, album string) DeezerResults {
+	var result DeezerResults
 	body, err := fetchURL(fmt.Sprintf("https://api.deezer.com/search/album/?q=%q&limit=10", url.QueryEscape(artist+" "+album)))
 	if err != nil {
 		log.Fatal("Failed to search album in Deezer database:", err)
@@ -257,6 +310,19 @@ func deezerSearch(artist string, album string) Results {
 		log.Fatal("Error while processing JSON response:", err)
 	}
 	return result
+}
+
+func deezerUPCLookup(id int64) string {
+	var albumMetadata DeezerAlbumJSON
+	body, err := fetchURL(fmt.Sprintf("https://api.deezer.com/album/%d", id))
+	if err != nil {
+		log.Fatal("Failed to lookup album metadata in Deezer database:", err)
+	}
+	err = json.Unmarshal(body, &albumMetadata)
+	if err != nil {
+		log.Fatal("Error while processing JSON response:", err)
+	}
+	return albumMetadata.Upc
 }
 
 func deezerLookup(id int64) []TrackMetadata {
@@ -272,14 +338,11 @@ func deezerLookup(id int64) []TrackMetadata {
 	if err != nil {
 		log.Fatal("Error while processing JSON response:", err)
 	}
-	for i, trackJSON := range albumMetadata.Tracks.Data {
+	for _, trackJSON := range albumMetadata.Tracks.Data {
 		trackIDs = append(trackIDs, trackJSON.ID)
-		fmt.Printf("%d: %d\n", i, trackJSON.ID)
 	}
 	if len(trackIDs) != albumMetadata.TotalTracks {
 		log.Fatalf("Total track IDs (%d) does not match album's reported track count (%d)", len(trackIDs), albumMetadata.TotalTracks)
-	} else {
-		fmt.Printf("Total track IDs (%d) matches album's reported track count (%d)\n", len(trackIDs), albumMetadata.TotalTracks)
 	}
 
 	for _, trackID := range trackIDs {
@@ -297,9 +360,22 @@ func deezerLookup(id int64) []TrackMetadata {
 	return deezerDecode(albumMetadata, trackMetadata)
 }
 
-func iTunesLookup(UPC string) []TrackMetadata {
+func iTunesSearch(UPC string) iTunesResults {
+	var result iTunesResults
+	body, err := fetchURL(fmt.Sprintf("https://itunes.apple.com/lookup?upc=%s&entity=album", UPC))
+	if err != nil {
+		log.Fatal("Error looking up album in iTunes database:", err)
+	}
+	err = json.Unmarshal(body, &result)
+	if err != nil {
+		log.Fatal("Error while processing JSON response:", err)
+	}
+	return result
+}
+
+func iTunesLookup(UPC string, ID int64) []TrackMetadata {
 	var result iTunesJSON
-	body, err := fetchURL(fmt.Sprintf("https://itunes.apple.com/lookup?upc=%s&entity=song", UPC))
+	body, err := fetchURL(fmt.Sprintf("https://itunes.apple.com/lookup?id=%d&entity=song", ID))
 	if err != nil {
 		log.Fatal("Error looking up album in iTunes database:", err)
 	}
@@ -423,9 +499,6 @@ func deezerDecode(album DeezerAlbumJSON, tracks []DeezerTrackJSON) []TrackMetada
 		tmp.TrackNumber = track.TrackPosition
 		tmp.TrackDisc = track.DiskNumber
 		metadata = append(metadata, tmp)
-		// Debugging
-		prettyStruct, _ := json.MarshalIndent(tmp, "", "  ")
-		fmt.Println(string(prettyStruct))
 	}
 	return metadata
 }
@@ -480,4 +553,37 @@ func (t TrackMetadata) ToTagMap() map[string][]string {
 	}
 
 	return tags
+}
+
+func Confirm(filelist []AudioFile, metadata []TrackMetadata) {
+	type printJob struct {
+		oldName string
+		newName string
+	}
+	var jobs []printJob
+	var longest int
+
+	// Phase 1: Collect names and find the longest filename
+	for _, file := range filelist {
+		s1 := file.Name
+		s2 := fmt.Sprintf("%d - %s", metadata[file.TrackNumber-1].TrackNumber, metadata[file.TrackNumber-1].TrackTitle)
+
+		if len(s1) > longest {
+			longest = len(s1)
+		}
+
+		jobs = append(jobs, printJob{oldName: s1, newName: s2})
+	}
+
+	// Phase 2: Print with dynamic arrow padding
+	for _, job := range jobs {
+		// Calculate how many extra dashes we need so the arrows align perfectly
+		padLength := longest - len(job.oldName)
+
+		// Create the arrow: space + (base dashes + extra padding dashes) + "> "
+		// If it's the longest filename, padLength is 0, so it gets exactly 3 dashes
+		arrow := " " + strings.Repeat("-", padLength+3) + "> "
+
+		fmt.Println(job.oldName + arrow + job.newName)
+	}
 }
