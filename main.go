@@ -240,7 +240,7 @@ func main() {
 	}
 
 	// Download cover art once
-	cover, err := fetchURL(metadata[0].CoverURL)
+	cover, err := fetchCover(metadata[0].CoverURL)
 	if err != nil {
 		fmt.Println("Failed to download cover art:", err)
 	}
@@ -417,29 +417,24 @@ func TagTrack(track AudioFile, metadata TrackMetadata, cover []byte) error {
 
 func deezerSearch(artist string, album string) DeezerResults {
 	var result DeezerResults
-	body, err := fetchURL(fmt.Sprintf("https://api.deezer.com/search/album/?q=%q&limit=10", url.QueryEscape(artist+" "+album)))
+	url := fmt.Sprintf("https://api.deezer.com/search/album/?q=%q&limit=10", url.QueryEscape(artist+" "+album))
+	err := fetchJSON(url, result)
 	if err != nil {
 		log.Fatal("Failed to search album in Deezer database:", err)
-	}
-	err = json.Unmarshal(body, &result)
-	if err != nil {
-		log.Fatal("Error while processing JSON response:", err)
 	}
 	return result
 }
 
 func deezerUPCLookup(id int64) string {
-	body, err := fetchURL(fmt.Sprintf("https://api.deezer.com/album/%d", id))
-	if err != nil {
-		log.Fatal("Failed to lookup album metadata in Deezer database:", err)
-	}
 	var result struct {
 		UPC string `json:"upc"`
 	}
-	err = json.Unmarshal(body, &result)
+	url := fmt.Sprintf("https://api.deezer.com/album/%d", id)
+	err := fetchJSON(url, &result)
 	if err != nil {
-		log.Fatal("Error while processing JSON response:", err)
+		log.Fatal("Failed to lookup album metadata in Deezer database:", err)
 	}
+
 	return result.UPC
 }
 
@@ -447,15 +442,14 @@ func deezerLookup(id int64) []TrackMetadata {
 	var albumMetadata DeezerAlbumJSON
 	var trackMetadata []DeezerTrackJSON
 	var trackIDs []int64
+	var url string
 
-	body, err := fetchURL(fmt.Sprintf("https://api.deezer.com/album/%d", id))
+	url = fmt.Sprintf("https://api.deezer.com/album/%d", id)
+	err := fetchJSON(url, &albumMetadata)
 	if err != nil {
 		log.Fatal("Failed to lookup album metadata in Deezer database:", err)
 	}
-	err = json.Unmarshal(body, &albumMetadata)
-	if err != nil {
-		log.Fatal("Error while processing JSON response:", err)
-	}
+
 	for _, trackJSON := range albumMetadata.Tracks.Data {
 		trackIDs = append(trackIDs, trackJSON.ID)
 	}
@@ -464,14 +458,11 @@ func deezerLookup(id int64) []TrackMetadata {
 	}
 
 	for _, trackID := range trackIDs {
-		body, err := fetchURL(fmt.Sprintf("https://api.deezer.com/track/%d", trackID))
+		var tmp DeezerTrackJSON
+		url = fmt.Sprintf("https://api.deezer.com/track/%d", trackID)
+		err := fetchJSON(url, &tmp)
 		if err != nil {
 			log.Fatal("Failed to lookup track metadata in Deezer database:", err)
-		}
-		var tmp DeezerTrackJSON
-		err = json.Unmarshal(body, &tmp)
-		if err != nil {
-			log.Fatal("Unable to parse JSON")
 		}
 		trackMetadata = append(trackMetadata, tmp)
 	}
@@ -480,31 +471,25 @@ func deezerLookup(id int64) []TrackMetadata {
 
 func iTunesSearch(UPC string) iTunesResults {
 	var result iTunesResults
-	body, err := fetchURL(fmt.Sprintf("https://itunes.apple.com/lookup?upc=%s&entity=album", UPC))
+	url := fmt.Sprintf("https://itunes.apple.com/lookup?upc=%s&entity=album", UPC)
+	err := fetchJSON(url, &result)
 	if err != nil {
 		log.Fatal("Error looking up album in iTunes database:", err)
-	}
-	err = json.Unmarshal(body, &result)
-	if err != nil {
-		log.Fatal("Error while processing JSON response:", err)
 	}
 	return result
 }
 
 func iTunesLookup(UPC string, ID int64) []TrackMetadata {
 	var result iTunesJSON
-	body, err := fetchURL(fmt.Sprintf("https://itunes.apple.com/lookup?id=%d&entity=song", ID))
+	url := fmt.Sprintf("https://itunes.apple.com/lookup?id=%d&entity=song", ID)
+	err := fetchJSON(url, &result)
 	if err != nil {
 		log.Fatal("Error looking up album in iTunes database:", err)
-	}
-	err = json.Unmarshal(body, &result)
-	if err != nil {
-		log.Fatal("Error while processing JSON response:", err)
 	}
 	return itunesDecode(result, UPC)
 }
 
-func fetchURL(URL string) ([]byte, error) {
+func fetchCover(URL string) ([]byte, error) {
 	resp, err := http.Get(URL)
 	if err != nil {
 		return nil, fmt.Errorf("HTTP GET request failed: %w", err)
@@ -521,6 +506,25 @@ func fetchURL(URL string) ([]byte, error) {
 	}
 
 	return body, nil
+}
+
+// Streams data directly into target variable thus avoiding io.ReadAll and returning []byte variable
+func fetchJSON(URL string, target any) error {
+	resp, err := http.Get(URL)
+	if err != nil {
+		return fmt.Errorf("HTTP GET request failed: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("HTTP Error code: %d", resp.StatusCode)
+	}
+
+	if err := json.NewDecoder(resp.Body).Decode(target); err != nil {
+		return fmt.Errorf("failed to decode JSON: %w", err)
+	}
+
+	defer resp.Body.Close()
+	return nil
 }
 
 func itunesDecode(album iTunesJSON, UPC string) []TrackMetadata {
