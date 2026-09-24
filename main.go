@@ -672,6 +672,9 @@ func (t TrackMetadata) ToTagMap() map[string][]string {
 	if t.TrackID != "" {
 		tags["DEEZERTRACKID"] = []string{t.DeezerTrackID}
 	}
+	if t.TrackExplicit == true {
+		tags["ITUNESADVISORY"] = []string{"1"}
+	}
 
 	return tags
 }
