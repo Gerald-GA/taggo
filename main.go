@@ -81,22 +81,21 @@ type DeezerTrackJSON struct {
 
 type iTunesJSON struct {
 	Results []struct {
-		ReleaseDate            time.Time `json:"releaseDate"`
-		PrimaryGenreName       string    `json:"primaryGenreName"`
-		TrackName              string    `json:"trackName,omitempty"`
-		ArtworkURL100          string    `json:"artworkUrl100"`
-		CollectionExplicitness string    `json:"collectionExplicitness"`
-		ArtistName             string    `json:"artistName"`
-		Copyright              string    `json:"copyright,omitempty"`
-		CollectionName         string    `json:"collectionName"`
-		TrackExplicitness      string    `json:"trackExplicitness,omitempty"`
-		Kind                   string    `json:"kind,omitempty"`
-		TrackCount             int       `json:"trackCount"`
-		CollectionID           int64     `json:"collectionId"`
-		TrackID                int64     `json:"trackId,omitempty"`
-		DiscCount              int       `json:"discCount,omitempty"`
-		DiscNumber             int       `json:"discNumber,omitempty"`
-		TrackNumber            int       `json:"trackNumber,omitempty"`
+		ReleaseDate       time.Time `json:"releaseDate"`
+		PrimaryGenreName  string    `json:"primaryGenreName"`
+		TrackName         string    `json:"trackName,omitempty"`
+		ArtworkURL100     string    `json:"artworkUrl100"`
+		ArtistName        string    `json:"artistName"`
+		Copyright         string    `json:"copyright,omitempty"`
+		CollectionName    string    `json:"collectionName"`
+		TrackExplicitness string    `json:"trackExplicitness,omitempty"`
+		Kind              string    `json:"kind,omitempty"`
+		TrackCount        int       `json:"trackCount"`
+		CollectionID      int64     `json:"collectionId"`
+		TrackID           int64     `json:"trackId,omitempty"`
+		DiscCount         int       `json:"discCount,omitempty"`
+		DiscNumber        int       `json:"discNumber,omitempty"`
+		TrackNumber       int       `json:"trackNumber,omitempty"`
 	} `json:"results"`
 }
 
@@ -119,7 +118,6 @@ type TrackMetadata struct {
 	TotalTracks   int
 	TrackNumber   int
 	TrackDisc     int
-	AlbumExplict  bool
 	TrackExplicit bool
 }
 
@@ -546,12 +544,6 @@ func itunesDecode(album iTunesJSON, UPC string) []TrackMetadata {
 	for i := 1; i <= album.Results[0].TrackCount; i++ {
 		var tmp TrackMetadata
 
-		if album.Results[0].CollectionExplicitness == "explicit" {
-			tmp.AlbumExplict = true
-		} else {
-			tmp.AlbumExplict = false
-		}
-
 		if album.Results[i].TrackExplicitness == "explicit" {
 			tmp.TrackExplicit = true
 		} else {
@@ -599,7 +591,6 @@ func deezerDecode(album DeezerAlbumJSON, tracks []DeezerTrackJSON) []TrackMetada
 		tmp.AlbumUPC = album.Upc
 		tmp.DeezerAlbumID = strconv.FormatInt(album.ID, 10)
 		tmp.DeezerTrackID = strconv.FormatInt(album.Tracks.Data[i].ID, 10)
-		tmp.AlbumExplict = album.ExplicitLyrics
 		tmp.AlbumName = album.Title
 		tmp.AlbumArtist = album.Artist.Name
 		tmp.TotalTracks = album.TotalTracks
